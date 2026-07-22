@@ -1,0 +1,13 @@
+[Unit]
+Description=Periodically sync active user's wallpaper into the SDDM greeter theme
+
+[Timer]
+# Run 2 minutes after boot, then every 10 minutes while the system is up.
+# Adjust to taste, or drop this file entirely and just trigger the .service
+# manually / from your WM's "set wallpaper" keybind instead.
+OnBootSec=2min
+OnUnitActiveSec=10min
+Unit=sync-wallpaper-to-sddm.service
+
+[Install]
+WantedBy=timers.target
