@@ -1,0 +1,15 @@
+[Unit]
+Description=Sync active user's wallpaper into the SDDM greeter theme
+After=graphical.target
+# Don't fight with the greeter while it's mid-render
+Wants=graphical.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/sddm-wallpaper-sync
+# Uncomment if you want failures to show up loudly in journalctl -xe
+# StandardOutput=journal
+# StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
