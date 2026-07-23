@@ -1,11 +1,10 @@
-# Maintainer: You <you@example.com>
 pkgname=sddm-wallpaper-sync
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="Sync the active user's wallpaper into the SDDM greeter theme"
 arch=('any')
-url="https://example.com/sddm-wallpaper-sync"
-license=('MIT')
+url="https://github.com/alexankitty/sddm-wallpaper-sync"
+license=('GPLv3')
 depends=('systemd' 'util-linux')
 optdepends=(
     'sddm: the greeter this syncs the wallpaper into'
