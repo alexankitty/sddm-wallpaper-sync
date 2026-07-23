@@ -6,7 +6,7 @@ pkgdesc="Sync the active user's wallpaper into the SDDM greeter theme"
 arch=('any')
 url="https://example.com/sync-wallpaper-to-sddm"
 license=('MIT')
-depends=('systemd' 'sudo')
+depends=('systemd' 'util-linux')
 optdepends=(
     'sddm: the greeter this syncs the wallpaper into'
     'swaybg: wallpaper daemon support'

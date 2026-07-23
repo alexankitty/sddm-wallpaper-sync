@@ -9,7 +9,7 @@ your desktop background.
 
 - `swaybg` (reads `-i` from its command line)
 - `swww` / `swww-daemon` (via `swww query`)
-- `awww` / `awww-daemon` — the renamed fork of swww (via `awww query`)
+- `awww` / `awww-daemon` - the renamed fork of swww (via `awww query`)
 - `hyprpaper` (`~/.config/hypr/hyprpaper.conf`)
 - `wpaperd` (`~/.config/wpaperd/{wallpaper,config}.toml`)
 - `nitrogen` (`~/.config/nitrogen/bg-saved.cfg`)
@@ -17,32 +17,17 @@ your desktop background.
 - `xwallpaper` (command line)
 - `variety` (`~/.config/variety/wallpaper.jpg` symlink)
 
-`mpvpaper` and `azote` are stubbed but not implemented — the script will
+`mpvpaper` and `azote` are stubbed but not implemented - the script will
 exit with a clear error naming the daemon if it hits one of these, so you
 can add a case for your setup.
 
-## How it finds the SDDM theme
+## How it works
+It parses your sddm config `sddm.conf` first and `sddm.conf.d/*` second, to determine what the active theme is.
 
-It reads `Current=` from `[Theme]` in `/etc/sddm.conf` and
-`/etc/sddm.conf.d/*.conf` (falls back to `breeze` if none is set), then
-writes into:
+Then it parses both the `Main.qml` and `metadata.desktop` to determine where the background needs to go and which config to add a `.user` config to. 
 
-```
-/usr/share/sddm/themes/<theme>/wallpaper-sync/background.<ext>
-```
+Once completed, it will override the wallpaper of sddm/sddm-lock depending on how the sddm theme is configured.
 
-and points the theme at it via a `theme.conf.user` override (most SDDM
-themes read this file and prefer it over the packaged `theme.conf`, so
-package updates won't clobber your change):
-
-```
-[General]
-Background=/usr/share/sddm/themes/<theme>/wallpaper-sync/background.<ext>
-```
-
-If your specific theme uses a different key than `Background=` for its
-image (check the theme's `theme.conf`), edit the last section of the
-script accordingly.
 
 ## Install
 
@@ -63,7 +48,31 @@ local files sitting next to the PKGBUILD, not a remote tarball. If you move
 this into a proper AUR/repo package with a download URL, regenerate them
 with `updpkgsums`.
 
-### Manual (any distro)
+### Manual (any distro) - using install.sh
+
+Put `install.sh`, `sync-wallpaper-to-sddm.sh`, `sync-wallpaper-to-sddm.service`,
+and `sync-wallpaper-to-sddm.timer` in the same directory, then:
+
+```bash
+sudo ./install.sh                 # install only
+sudo ./install.sh --enable        # install + enable the periodic timer
+sudo ./install.sh --start         # install + run a sync once, right now
+sudo ./install.sh --enable --start
+```
+
+It copies the script to `/usr/bin/sync-wallpaper-to-sddm`, the units to
+`/etc/systemd/system/`, and runs `systemctl daemon-reload`. To remove
+everything it installed:
+
+```bash
+sudo ./install.sh --uninstall
+```
+
+This doesn't touch any theme background already synced or its `.orig`
+backup - run `sudo sync-wallpaper-to-sddm restore` first if you want the
+theme's original background back before uninstalling.
+
+### Manual (any distro) - by hand
 
 ```bash
 sudo cp sync-wallpaper-to-sddm.sh /usr/bin/sync-wallpaper-to-sddm
@@ -89,7 +98,7 @@ sudo systemctl enable --now sync-wallpaper-to-sddm.timer
 ## Why a timer instead of an instant trigger
 
 There's no single generic event across all these wallpaper daemons for
-"wallpaper just changed" — some (`swaybg`) don't even have a config file,
+"wallpaper just changed" - some (`swaybg`) don't even have a config file,
 they just take an argument at launch. The timer is the simplest thing
 that works everywhere. If you only use one daemon, you can instead skip
 the timer and just call:
@@ -98,10 +107,13 @@ the timer and just call:
 systemctl start sync-wallpaper-to-sddm.service
 ```
 
-directly from whatever keybind/script you use to change your wallpaper —
+directly from whatever keybind/script you use to change your wallpaper -
 that gives you an instant update with no polling.
 
 ## Requirements
 
-- `sudo`, `loginctl` (systemd-logind), `pgrep`, `getent`, `awk`, `sed`
+- `runuser` (from `util-linux`), `loginctl` (systemd-logind), `pgrep`, `getent`, `awk`, `sed`
 - Root privileges to write into `/usr/share/sddm/themes/...`
+
+## Contributing
+Submit a PR or Issue with whatever problems need to be addressed. I've only tested with awww.

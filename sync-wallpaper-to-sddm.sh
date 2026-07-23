@@ -55,17 +55,6 @@ USER_UID=$(id -u "$SESSION_USER" 2>/dev/null)
 
 log "Active session: id=$SESSION_ID user=$SESSION_USER type=$SESSION_TYPE home=$USER_HOME"
 
-XDG_RUNTIME_DIR="/run/user/${USER_UID}"
-USER_DBUS_ADDR="unix:path=${XDG_RUNTIME_DIR}/bus"
-
-run_as_user() {
-    sudo -u "$SESSION_USER" \
-        env XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" \
-            DBUS_SESSION_BUS_ADDRESS="$USER_DBUS_ADDR" \
-            HOME="$USER_HOME" \
-        "$@"
-}
-
 # ---------------------------------------------------------------------------
 # 2. Detect which wallpaper daemon is running for that user
 # ---------------------------------------------------------------------------
@@ -85,6 +74,58 @@ detect_daemon() {
 DAEMON=$(detect_daemon) || die "No known wallpaper daemon found running for user '$SESSION_USER'."
 log "Detected wallpaper daemon: $DAEMON"
 
+# Grab the daemon's own PID so we can read its *actual* environment below,
+# rather than guessing WAYLAND_DISPLAY/DBUS_SESSION_BUS_ADDRESS/etc ourselves.
+DAEMON_PID=$(pgrep -u "$SESSION_USER" -x "$DAEMON" | head -n1)
+[[ -z "$DAEMON_PID" ]] && die "Detected daemon '$DAEMON' but could not get its PID."
+
+# ---------------------------------------------------------------------------
+# 2a. Recover the daemon's real environment from /proc/<pid>/environ
+#
+# This matters because things like `swww query` / `awww query` talk to a
+# per-Wayland-session IPC socket, and need WAYLAND_DISPLAY (and sometimes
+# XAUTHORITY/DISPLAY for X11) to find the right one. Reconstructing these
+# by hand (e.g. always assuming "wayland-1") is fragile; reading them
+# straight out of the daemon's own environment is exact, since it
+# inherited them from the compositor/session at launch. Root can always
+# read another process's environ.
+# ---------------------------------------------------------------------------
+
+get_pid_env() {
+    local pid="$1" var="$2"
+    tr '\0' '\n' < "/proc/${pid}/environ" 2>/dev/null \
+        | awk -F= -v k="$var" '$1==k { sub(/^[^=]*=/, ""); print; exit }'
+}
+
+ENV_WAYLAND_DISPLAY=$(get_pid_env "$DAEMON_PID" WAYLAND_DISPLAY)
+ENV_DISPLAY=$(get_pid_env "$DAEMON_PID" DISPLAY)
+ENV_XAUTHORITY=$(get_pid_env "$DAEMON_PID" XAUTHORITY)
+ENV_XDG_RUNTIME_DIR=$(get_pid_env "$DAEMON_PID" XDG_RUNTIME_DIR)
+ENV_DBUS_ADDR=$(get_pid_env "$DAEMON_PID" DBUS_SESSION_BUS_ADDRESS)
+
+# Fall back to reasonable defaults only if the daemon's environ didn't have them
+XDG_RUNTIME_DIR="${ENV_XDG_RUNTIME_DIR:-/run/user/${USER_UID}}"
+DBUS_ADDR="${ENV_DBUS_ADDR:-unix:path=${XDG_RUNTIME_DIR}/bus}"
+
+log "Recovered session env from PID $DAEMON_PID: WAYLAND_DISPLAY=${ENV_WAYLAND_DISPLAY:-<none>} DISPLAY=${ENV_DISPLAY:-<none>} XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"
+
+EXTRA_ENV=(
+    "HOME=${USER_HOME}"
+    "XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR}"
+    "DBUS_SESSION_BUS_ADDRESS=${DBUS_ADDR}"
+)
+[[ -n "$ENV_WAYLAND_DISPLAY" ]] && EXTRA_ENV+=("WAYLAND_DISPLAY=${ENV_WAYLAND_DISPLAY}")
+[[ -n "$ENV_DISPLAY" ]] && EXTRA_ENV+=("DISPLAY=${ENV_DISPLAY}")
+[[ -n "$ENV_XAUTHORITY" ]] && EXTRA_ENV+=("XAUTHORITY=${ENV_XAUTHORITY}")
+
+# Using `runuser` instead of `sudo`: we're already root, so this needs no
+# PAM password prompt and no TTY, which matters when running non-interactively
+# from a systemd service (sudo can behave inconsistently there depending on
+# the sudoers policy).
+run_as_user() {
+    runuser -u "$SESSION_USER" -- env "${EXTRA_ENV[@]}" "$@"
+}
+
 WALLPAPER_PATH=""
 SOURCE_CONFIG=""   # path to the daemon's config file, if any, for reference
 
@@ -102,8 +143,11 @@ case "$DAEMON" in
         else
             QUERY_BIN="swww"
         fi
-        QUERY_OUT=$(run_as_user "$QUERY_BIN" query 2>/dev/null)
+        QUERY_OUT=$(run_as_user "$QUERY_BIN" query 2>&1)
         WALLPAPER_PATH=$(echo "$QUERY_OUT" | grep -oP "image:\s*\K\S+" | head -n1)
+        if [[ -z "$WALLPAPER_PATH" ]]; then
+            log "'$QUERY_BIN query' produced no usable output: $QUERY_OUT"
+        fi
         ;;
     hyprpaper)
         SOURCE_CONFIG="${USER_HOME}/.config/hypr/hyprpaper.conf"
@@ -159,15 +203,36 @@ log "Resolved wallpaper image: $WALLPAPER_PATH"
 # ---------------------------------------------------------------------------
 
 SDDM_THEME=""
-for f in /etc/sddm.conf /etc/sddm.conf.d/*.conf; do
-    [[ -f "$f" ]] || continue
-    val=$(awk -F= '
+
+get_theme_from_file() {
+    awk -F= '
         /^\[Theme\]/ {in_theme=1; next}
         /^\[/ {in_theme=0}
         in_theme && $1 ~ /^ *Current *$/ {gsub(/ /,"",$2); print $2}
-    ' "$f")
-    [[ -n "$val" ]] && SDDM_THEME="$val"
-done
+    ' "$1"
+}
+
+# /etc/sddm.conf is treated as authoritative: if it sets a theme, that wins
+# outright. Only fall back to /etc/sddm.conf.d/*.conf snippets if the main
+# config file doesn't set one.
+if [[ -f /etc/sddm.conf ]]; then
+    val=$(get_theme_from_file /etc/sddm.conf)
+    if [[ -n "$val" ]]; then
+        SDDM_THEME="$val"
+        log "Theme resolved from /etc/sddm.conf: $SDDM_THEME"
+    fi
+fi
+
+if [[ -z "$SDDM_THEME" ]]; then
+    for f in /etc/sddm.conf.d/*.conf; do
+        [[ -f "$f" ]] || continue
+        val=$(get_theme_from_file "$f")
+        if [[ -n "$val" ]]; then
+            SDDM_THEME="$val"
+            log "Theme resolved from $f"
+        fi
+    done
+fi
 
 if [[ -z "$SDDM_THEME" ]]; then
     SDDM_THEME="breeze"
@@ -181,14 +246,37 @@ log "Active SDDM theme: $SDDM_THEME ($THEME_DIR)"
 
 # ---------------------------------------------------------------------------
 # 4. Copy the wallpaper (and source config, for reference) into the theme
+#
+# Some themes' QML (e.g. Silent) hardcode a "backgrounds/" prefix and
+# concatenate it onto whatever the config's Background value is, rather
+# than treating that value as a normal path: source: "backgrounds/" + value.
+# Feeding those themes an absolute path breaks them, since
+# "backgrounds/" + "/abs/path" is not a valid path and silently falls back
+# to the theme's own default. Detect that convention by grepping the
+# theme's QML for the literal concatenation, and adapt: store the file
+# inside the theme's backgrounds/ dir and reference it with a bare
+# filename instead of an absolute path.
 # ---------------------------------------------------------------------------
 
-SYNC_DIR="${THEME_DIR}/wallpaper-sync"
-mkdir -p "$SYNC_DIR"
-
 EXT="${WALLPAPER_PATH##*.}"
-DEST_IMG="${SYNC_DIR}/background.${EXT}"
 
+RELATIVE_BG=false
+if [[ -d "${THEME_DIR}/backgrounds" ]] && grep -qrE '"backgrounds/"[[:space:]]*\+' "${THEME_DIR}" --include='*.qml' 2>/dev/null; then
+    RELATIVE_BG=true
+fi
+
+if [[ "$RELATIVE_BG" == true ]]; then
+    SYNC_DIR="${THEME_DIR}/backgrounds"
+    DEST_IMG="${SYNC_DIR}/wallpaper-sync.${EXT}"
+    BG_VALUE="wallpaper-sync.${EXT}"   # relative to backgrounds/, per this theme's QML convention
+    log "Theme resolves backgrounds as 'backgrounds/' + <value>; using relative filename '$BG_VALUE'"
+else
+    SYNC_DIR="${THEME_DIR}/wallpaper-sync"
+    DEST_IMG="${SYNC_DIR}/background.${EXT}"
+    BG_VALUE="$DEST_IMG"   # absolute path, the common convention
+fi
+
+mkdir -p "$SYNC_DIR"
 cp -f "$WALLPAPER_PATH" "$DEST_IMG" || die "Failed to copy wallpaper into $DEST_IMG"
 chmod 644 "$DEST_IMG"
 log "Copied wallpaper to $DEST_IMG"
@@ -198,22 +286,70 @@ if [[ -n "$SOURCE_CONFIG" && -f "$SOURCE_CONFIG" ]]; then
     log "Copied source config for reference to ${SYNC_DIR}/source-$(basename "$SOURCE_CONFIG")"
 fi
 
+
 # ---------------------------------------------------------------------------
-# 5. Point the theme at the new wallpaper via a theme.conf.user override
-#    (most SDDM themes read theme.conf.user first and it won't be clobbered
-#    by package updates to theme.conf)
+# 5. Point the theme at the new wallpaper via a "<config>.user" override
+#
+# SDDM's QML config reader (the "explicitly typed API" -- see the
+# ConfigFile comment in metadata.desktop) reads "<config>.user" alongside
+# the base config and lets its values take precedence, section by section.
+# This is the correct place to make this change: it never touches the
+# theme's shipped config, so there's nothing to back up or restore, and it
+# survives theme package updates. We only ever write the Background key
+# itself, scoped to whichever section(s) the base config actually defines
+# it under -- never a full copy of the config.
 # ---------------------------------------------------------------------------
 
-OVERRIDE="${THEME_DIR}/theme.conf.user"
+metadata_desktop_path="${THEME_DIR}/metadata.desktop"
+conf_path="${THEME_DIR}/$(sed -n 's/^ConfigFile=\(.*\)/\1/p' < $metadata_desktop_path)"
 
-if [[ -f "$OVERRIDE" ]] && grep -q '^Background=' "$OVERRIDE" 2>/dev/null; then
-    sed -i "s|^Background=.*|Background=${DEST_IMG}|" "$OVERRIDE"
-else
-    {
-        echo "[General]"
-        echo "Background=${DEST_IMG}"
-    } >> "$OVERRIDE"
-fi
+[[ -f "$conf_path" ]] || die "SDDM theme config file not found: $conf_path"
 
-log "Updated $OVERRIDE with Background=${DEST_IMG}"
+USER_OVERRIDE="${conf_path}.user"
+
+# Find every section in the base config that declares a Background/background
+# key, in order of first appearance, deduplicated. Falls back to [General]
+# if the theme uses a flat, non-sectioned Background key.
+mapfile -t BG_SECTIONS < <(awk '
+    /^[[:space:]]*\[/ {
+        line=$0
+        gsub(/^[[:space:]]*\[|\][[:space:]]*$/, "", line)
+        section=line
+        next
+    }
+    /^[[:space:]]*[Bb]ackground[[:space:]]*=/ {
+        if (!(section in seen)) { print section; seen[section]=1 }
+    }
+' "$conf_path")
+
+[[ "${#BG_SECTIONS[@]}" -eq 0 ]] && BG_SECTIONS=("General")
+
+log "Sections with a Background key in $conf_path: ${BG_SECTIONS[*]}"
+
+for section in "${BG_SECTIONS[@]}"; do
+    if [[ -f "$USER_OVERRIDE" ]] && grep -qF "[${section}]" "$USER_OVERRIDE"; then
+        # Section already exists in the override file: update/insert its
+        # background line in place without touching anything else there.
+        awk -v sec="[${section}]" -v val="$BG_VALUE" '
+            BEGIN { in_sec=0; done=0 }
+            /^\[/ {
+                if (in_sec && !done) { print "background = \"" val "\""; done=1 }
+                in_sec = ($0 == sec)
+                print; next
+            }
+            in_sec && /^[[:space:]]*[Bb]ackground[[:space:]]*=/ {
+                print "background = \"" val "\""; done=1; next
+            }
+            { print }
+            END { if (in_sec && !done) print "background = \"" val "\"" }
+        ' "$USER_OVERRIDE" > "${USER_OVERRIDE}.tmp" && mv "${USER_OVERRIDE}.tmp" "$USER_OVERRIDE"
+    else
+        {
+            echo "[${section}]"
+            echo "background = \"${BG_VALUE}\""
+        } >> "$USER_OVERRIDE"
+    fi
+done
+
+log "Updated $USER_OVERRIDE with background overrides for: ${BG_SECTIONS[*]} -> ${BG_VALUE}"
 log "Done."
