@@ -33,14 +33,14 @@ Once completed, it will override the wallpaper of sddm/sddm-lock depending on ho
 
 ### Arch Linux (PKGBUILD)
 
-Put `PKGBUILD`, `sync-wallpaper-to-sddm.sh`, `sync-wallpaper-to-sddm.service`,
-and `sync-wallpaper-to-sddm.timer` in the same directory, then:
+Put `PKGBUILD`, `sddm-wallpaper-sync.sh`, `sddm-wallpaper-sync.service`,
+and `sddm-wallpaper-sync.timer` in the same directory, then:
 
 ```bash
 makepkg -si
 ```
 
-This installs the script to `/usr/bin/sync-wallpaper-to-sddm` and the units
+This installs the script to `/usr/bin/sddm-wallpaper-sync` and the units
 to `/usr/lib/systemd/system/`. Then just enable/start as below.
 
 The `sha256sums` in the PKGBUILD are set to `SKIP` since the sources are
@@ -50,8 +50,8 @@ with `updpkgsums`.
 
 ### Manual (any distro) - using install.sh
 
-Put `install.sh`, `sync-wallpaper-to-sddm.sh`, `sync-wallpaper-to-sddm.service`,
-and `sync-wallpaper-to-sddm.timer` in the same directory, then:
+Put `install.sh`, `sddm-wallpaper-sync.sh`, `sddm-wallpaper-sync.service`,
+and `sddm-wallpaper-sync.timer` in the same directory, then:
 
 ```bash
 sudo ./install.sh                 # install only
@@ -60,7 +60,7 @@ sudo ./install.sh --start         # install + run a sync once, right now
 sudo ./install.sh --enable --start
 ```
 
-It copies the script to `/usr/bin/sync-wallpaper-to-sddm`, the units to
+It copies the script to `/usr/bin/sddm-wallpaper-sync`, the units to
 `/etc/systemd/system/`, and runs `systemctl daemon-reload`. To remove
 everything it installed:
 
@@ -69,17 +69,17 @@ sudo ./install.sh --uninstall
 ```
 
 This doesn't touch any theme background already synced or its `.orig`
-backup - run `sudo sync-wallpaper-to-sddm restore` first if you want the
+backup - run `sudo sddm-wallpaper-sync restore` first if you want the
 theme's original background back before uninstalling.
 
 ### Manual (any distro) - by hand
 
 ```bash
-sudo cp sync-wallpaper-to-sddm.sh /usr/bin/sync-wallpaper-to-sddm
-sudo chmod +x /usr/bin/sync-wallpaper-to-sddm
+sudo cp sddm-wallpaper-sync.sh /usr/bin/sddm-wallpaper-sync
+sudo chmod +x /usr/bin/sddm-wallpaper-sync
 
-sudo cp sync-wallpaper-to-sddm.service /etc/systemd/system/
-sudo cp sync-wallpaper-to-sddm.timer   /etc/systemd/system/   # optional
+sudo cp sddm-wallpaper-sync.service /etc/systemd/system/
+sudo cp sddm-wallpaper-sync.timer   /etc/systemd/system/   # optional
 
 sudo systemctl daemon-reload
 ```
@@ -88,11 +88,11 @@ sudo systemctl daemon-reload
 
 ```bash
 # Run once by hand to sanity-check it:
-sudo systemctl start sync-wallpaper-to-sddm.service
-journalctl -u sync-wallpaper-to-sddm.service -e
+sudo systemctl start sddm-wallpaper-sync.service
+journalctl -u sddm-wallpaper-sync.service -e
 
 # Optional: keep it synced automatically every ~10 min
-sudo systemctl enable --now sync-wallpaper-to-sddm.timer
+sudo systemctl enable --now sddm-wallpaper-sync.timer
 ```
 
 ## Why a timer instead of an instant trigger
@@ -104,7 +104,7 @@ that works everywhere. If you only use one daemon, you can instead skip
 the timer and just call:
 
 ```bash
-systemctl start sync-wallpaper-to-sddm.service
+systemctl start sddm-wallpaper-sync.service
 ```
 
 directly from whatever keybind/script you use to change your wallpaper -

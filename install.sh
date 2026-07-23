@@ -2,7 +2,7 @@
 #
 # install.sh
 #
-# Installs sync-wallpaper-to-sddm: copies the script to /usr/bin, the
+# Installs sddm-wallpaper-sync: copies the script to /usr/bin, the
 # systemd units to /etc/systemd/system, and reloads systemd. Doesn't
 # enable/start anything by default — pass --enable and/or --start if you
 # want that done for you too.
@@ -17,7 +17,7 @@
 
 set -uo pipefail
 
-BIN_NAME="sync-wallpaper-to-sddm"
+BIN_NAME="sddm-wallpaper-sync"
 BIN_DEST="/usr/bin/${BIN_NAME}"
 UNIT_DIR="/etc/systemd/system"
 SERVICE_NAME="${BIN_NAME}.service"

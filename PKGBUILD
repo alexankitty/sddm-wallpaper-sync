@@ -1,10 +1,10 @@
 # Maintainer: You <you@example.com>
-pkgname=sync-wallpaper-to-sddm
+pkgname=sddm-wallpaper-sync
 pkgver=1.0.0
 pkgrel=1
 pkgdesc="Sync the active user's wallpaper into the SDDM greeter theme"
 arch=('any')
-url="https://example.com/sync-wallpaper-to-sddm"
+url="https://example.com/sddm-wallpaper-sync"
 license=('MIT')
 depends=('systemd' 'util-linux')
 optdepends=(
@@ -21,21 +21,21 @@ optdepends=(
 )
 backup=()
 source=(
-    "sync-wallpaper-to-sddm.sh"
-    "sync-wallpaper-to-sddm.service"
-    "sync-wallpaper-to-sddm.timer"
+    "sddm-wallpaper-sync.sh"
+    "sddm-wallpaper-sync.service"
+    "sddm-wallpaper-sync.timer"
 )
 sha256sums=('SKIP'
             'SKIP'
             'SKIP')
 
 package() {
-    install -Dm755 "$srcdir/sync-wallpaper-to-sddm.sh" \
-        "$pkgdir/usr/bin/sync-wallpaper-to-sddm"
+    install -Dm755 "$srcdir/sddm-wallpaper-sync.sh" \
+        "$pkgdir/usr/bin/sddm-wallpaper-sync"
 
-    install -Dm644 "$srcdir/sync-wallpaper-to-sddm.service" \
-        "$pkgdir/usr/lib/systemd/system/sync-wallpaper-to-sddm.service"
+    install -Dm644 "$srcdir/sddm-wallpaper-sync.service" \
+        "$pkgdir/usr/lib/systemd/system/sddm-wallpaper-sync.service"
 
-    install -Dm644 "$srcdir/sync-wallpaper-to-sddm.timer" \
-        "$pkgdir/usr/lib/systemd/system/sync-wallpaper-to-sddm.timer"
+    install -Dm644 "$srcdir/sddm-wallpaper-sync.timer" \
+        "$pkgdir/usr/lib/systemd/system/sddm-wallpaper-sync.timer"
 }
